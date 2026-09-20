@@ -101,6 +101,29 @@ class ConsoleTest(unittest.TestCase):
         self.assertEqual("validation-error", payload["error"])
         self.assertEqual("drum_level", payload["details"]["param"])
 
+    def test_all_param_issues_are_aggregated(self) -> None:
+        status, payload = self._request(
+            "POST",
+            "/api/furnace/feed",
+            {"rate_tph": "fast", "tons": -1, "tonns": 5},
+        )
+        self.assertEqual(400, status)
+        issues = payload["details"]["issues"]
+        by_code = {item["param"]: item["code"] for item in issues}
+        self.assertIn("heat_id", by_code)  # 缺参
+        self.assertEqual("invalid-type", by_code["rate_tph"])  # 类型错
+        self.assertEqual("out-of-range", by_code["tons"])  # 越限
+        self.assertEqual("unknown-param", by_code["tonns"])  # 不认的参数
+        self.assertEqual(payload["details"]["issue_count"], len(issues))
+
+    def test_action_spec_endpoint(self) -> None:
+        status, payload = self._request("GET", "/api/actions/conv.blow")
+        self.assertEqual(200, status)
+        self.assertEqual("conv.blow", payload["action"])
+        seconds = next(item for item in payload["params"] if item["name"] == "seconds")
+        self.assertEqual("s", seconds["unit"])
+        self.assertTrue(seconds["exclusive_minimum"])
+
     def test_actions_listing_and_audit_query(self) -> None:
         status, listing = self._request("GET", "/api/actions")
         self.assertEqual(200, status)

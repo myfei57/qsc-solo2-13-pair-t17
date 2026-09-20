@@ -96,6 +96,38 @@ class CliTest(unittest.TestCase):
         self.assertEqual(1, unknown.returncode)
         self.assertEqual("validation-error", self._json(unknown)["error"])
 
+    def test_failed_call_lists_every_issue_for_humans(self) -> None:
+        completed = run_cli("call", "furnace.feed", root=self.root)
+        self.assertEqual(1, completed.returncode)
+        # stderr：值班直接读，缺的三个参数逐行点名
+        self.assertIn("rate_tph", completed.stderr)
+        self.assertIn("tons", completed.stderr)
+        self.assertIn("heat_id", completed.stderr)
+        # stdout：结构化 JSON，issues 一次列全
+        payload = self._json(completed)
+        self.assertEqual(3, payload["details"]["issue_count"])
+
+    def test_unit_mistake_gets_conversion_hint(self) -> None:
+        completed = run_cli(
+            "call",
+            "burner.ignite",
+            "--param", "fuel_pressure_kpa=200000",
+            "--param", "air_flow_nm3h=5200",
+            root=self.root,
+        )
+        self.assertEqual(1, completed.returncode)
+        self.assertIn("Pa", completed.stderr)
+        self.assertIn("120~320 kPa", completed.stderr)
+
+    def test_actions_can_show_param_spec(self) -> None:
+        completed = run_cli("actions", "furnace.start", root=self.root)
+        self.assertEqual(0, completed.returncode)
+        payload = self._json(completed)
+        names = {item["name"] for item in payload["params"]}
+        self.assertIn("fuel_pressure_kpa", names)
+        pressure = next(item for item in payload["params"] if item["name"] == "fuel_pressure_kpa")
+        self.assertEqual("kPa", pressure["unit"])
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

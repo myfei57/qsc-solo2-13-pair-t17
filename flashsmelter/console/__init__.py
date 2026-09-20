@@ -110,6 +110,7 @@ class ConsoleApp:
         self.router.add("GET", "/api/state", self._state)
         self.router.add("GET", "/api/metrics", self._metrics)
         self.router.add("GET", "/api/actions", self._actions)
+        self.router.add("GET", "/api/actions/{action}", self._action_spec)
         self.router.add("GET", "/api/audit", self._audit)
         self.router.add("GET", "/api/heats", self._heats)
         self.router.add("GET", "/api/components", self._components)
@@ -163,6 +164,9 @@ class ConsoleApp:
 
     def _actions(self, _path: Mapping[str, str], _params: Mapping[str, Any]) -> Mapping[str, Any]:
         return {"actions": self.application.describe_actions()}
+
+    def _action_spec(self, path: Mapping[str, str], _params: Mapping[str, Any]) -> Mapping[str, Any]:
+        return self.application.describe_action(path["action"])
 
     def _audit(self, _path: Mapping[str, str], params: Mapping[str, Any]) -> Mapping[str, Any]:
         from ..params import Params

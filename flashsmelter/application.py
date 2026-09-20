@@ -14,7 +14,7 @@ from .component import Component, ensure_actor
 from .conc import ConcentrateSystem
 from .config import Settings
 from .conv import Converter
-from .errors import ValidationError
+from .errors import ConfigurationError, ValidationError
 from .furnace import FlashFurnace
 from .matte import MatteTap
 from .ns import Namespace
@@ -23,7 +23,9 @@ from .params import Params
 from .runtime import Clock, Generation, Metrics, RuntimeContext
 from .settler import Settler
 from .slag import SlagTap
+from .specs import ActionSpec, build_action_specs
 from .store import DurableStore
+from .validation import validate_action
 from .waste import WasteHeatBoiler
 
 ActionHandler = Callable[[Params], Mapping[str, Any]]
@@ -53,6 +55,15 @@ class Application:
         )
         self._build_components()
         self._actions: dict[str, ActionHandler] = self._build_actions()
+        self._action_specs: dict[str, ActionSpec] = build_action_specs(settings)
+        if set(self._action_specs) != set(self._actions):
+            raise ConfigurationError(
+                "动作参数规格与动作注册表不一致",
+                details={
+                    "missing_specs": sorted(set(self._actions) - set(self._action_specs)),
+                    "extra_specs": sorted(set(self._action_specs) - set(self._actions)),
+                },
+            )
 
     # ------------------------------------------------------------- 组件装配
     def _build_components(self) -> None:
@@ -536,9 +547,12 @@ class Application:
     def invoke(self, action: str, params: Mapping[str, Any] | None = None, *, source: str = "api") -> Mapping[str, Any]:
         try:
             handler = self._actions[action]
+            spec = self._action_specs[action]
         except KeyError as exc:
             raise ValidationError("未知动作", details={"action": action, "known": sorted(self._actions)}) from exc
         parsed = params if isinstance(params, Params) else Params(params, source=source)
+        # 按规格一次性校验：缺参、越限、未知参数、单位疑似填错，一次说全。
+        validate_action(spec, parsed.raw, source=source)
         return handler(parsed)
 
     def state(self) -> Mapping[str, Any]:
@@ -579,15 +593,15 @@ class Application:
         return payload
 
     def describe_actions(self) -> list[Mapping[str, Any]]:
-        return [
-            {
-                "action": name,
-                "component": name.split(".", 1)[0],
-                "verb": name.split(".", 1)[1],
-                "endpoint": "/api/" + name.replace(".", "/"),
-            }
-            for name in sorted(self._actions)
-        ]
+        return [self._action_specs[name].describe() for name in sorted(self._actions)]
+
+    def describe_action(self, action: str) -> Mapping[str, Any]:
+        try:
+            return self._action_specs[action].describe()
+        except KeyError as exc:
+            raise ValidationError(
+                "未知动作", details={"action": action, "known": sorted(self._actions)}
+            ) from exc
 
 
 def _version() -> str:

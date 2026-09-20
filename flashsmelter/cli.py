@@ -68,11 +68,31 @@ def _print(payload: Any) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
 
+def _render_error(exc: FlashSmelterError) -> None:
+    """把结构化错误翻成值班在终端里能直接照做的中文提示（写到 stderr）。
+
+    stdout 仍保留完整 JSON，方便脚本解析；人看终端只需要读这几行。
+    """
+
+    lines = [f"指令被拒绝：{exc.message}"]
+    details = exc.details or {}
+    for issue in details.get("issues") or ():
+        line = f"  - [{issue.get('code')}] {issue.get('message')}"
+        lines.append(line)
+    if not details.get("issues") and details:
+        # 非聚合错误（如未知动作、JSON 解析失败）：把关键细节补出来。
+        for key in ("action", "unknown", "allowed", "known", "value"):
+            if key in details:
+                lines.append(f"  {key}: {details[key]}")
+    print("\n".join(lines), file=sys.stderr)
+
+
 def _run(action: str, params: Mapping[str, Any], args: argparse.Namespace) -> int:
     application = Application(_build_settings(args))
     try:
         result = application.invoke(action, params, source=f"cli:{action}")
     except FlashSmelterError as exc:
+        _render_error(exc)
         _print(exc.to_dict())
         return 1
     _print({"action": action, "result": dict(result)})
@@ -109,6 +129,9 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 def _cmd_actions(args: argparse.Namespace) -> int:
     application = Application(_build_settings(args))
+    if getattr(args, "name", None):
+        _print(application.describe_action(args.name))
+        return 0
     _print({"actions": application.describe_actions()})
     return 0
 
@@ -171,6 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.set_defaults(func=_cmd_status)
 
     actions = subparsers.add_parser("actions", help="列出可用动作")
+    actions.add_argument("name", nargs="?", help="动作名，如 furnace.start；给出则打印该动作的参数规格")
     actions.set_defaults(func=_cmd_actions)
 
     call = subparsers.add_parser("call", help="下发一条控制指令")
@@ -212,6 +236,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return int(args.func(args))
     except FlashSmelterError as exc:
+        _render_error(exc)
         _print(exc.to_dict())
         return 1
 
